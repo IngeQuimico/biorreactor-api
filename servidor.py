@@ -1,60 +1,74 @@
-# servidor.py (Versión final con puente ASGI-WSGI)
+# servidor.py (Versión final ASÍNCRONA)
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import os
 import libsql_client
-from asgiref.wsgi import WsgiToAsgi # <--- IMPORTAMOS EL TRADUCTOR
+from asgiref.wsgi import WsgiToAsgi
 
 app = Flask(__name__)
 CORS(app)
+asgi_app = WsgiToAsgi(app) # Puente para que Flask hable con el servidor ASGI
 
-# --- APLICAMOS EL TRADUCTOR ---
-# Esto envuelve nuestra aplicación Flask para que pueda "hablar" con el servidor ASGI (Uvicorn)
-asgi_app = WsgiToAsgi(app)
-
-def create_turso_client():
+# --- FUNCIÓN ASÍNCRONA PARA CREAR UNA CONEXIÓN CON TURSO ---
+async def create_turso_client():
+    """Crea y devuelve un cliente de Turso de forma asíncrona."""
     url = os.environ.get("TURSO_DATABASE_URL")
     auth_token = os.environ.get("TURSO_AUTH_TOKEN")
     if not url: raise ValueError("Variable TURSO_DATABASE_URL no encontrada.")
     if not auth_token: raise ValueError("Variable TURSO_AUTH_TOKEN no encontrada.")
-    # Usamos la función oficial 'create_client'
-    return libsql_client.create_client(url=url, auth_token=auth_token)
+    
+    # Usamos 'async with' para manejar la conexión y cierre automáticamente
+    async with libsql_client.create_client(url=url, auth_token=auth_token) as client:
+        return client
 
-def init_db():
+# --- FUNCIÓN ASÍNCRONA PARA INICIALIZAR LA BASE DE DATOS ---
+@app.before_serving
+async def init_db():
+    """Asegura que la tabla 'lecturas' exista en la base de datos de Turso."""
     try:
-        client = create_turso_client()
-        client.execute("CREATE TABLE IF NOT EXISTS lecturas (id INTEGER PRIMARY KEY, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP, temperatura_c REAL, ph_valor REAL)")
+        async with libsql_client.create_client(url=os.environ.get("TURSO_DATABASE_URL"), auth_token=os.environ.get("TURSO_AUTH_TOKEN")) as client:
+            await client.execute("""
+                CREATE TABLE IF NOT EXISTS lecturas (
+                    id INTEGER PRIMARY KEY,
+                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    temperatura_c REAL,
+                    ph_valor REAL
+                )
+            """)
         print("Conexión con Turso exitosa. Tabla 'lecturas' verificada.")
-        client.close()
     except Exception as e:
         print(f"Error al inicializar la base de datos en Turso: {e}")
 
+# --- RUTAS DE LA API (AHORA ASÍNCRONAS) ---
+
 @app.route('/datos', methods=['POST'])
-def recibir_datos():
+async def recibir_datos():
     try:
-        datos = request.get_json()
-        client = create_turso_client()
-        client.execute("INSERT INTO lecturas (temperatura_c, ph_valor) VALUES (?, ?)", (datos.get('temperatura'), datos.get('ph')))
-        client.close()
+        datos = await request.get_json()
+        temp = datos.get('temperatura')
+        ph = datos.get('ph')
+        print(f"Dato recibido -> Temp: {temp} °C, pH: {ph}")
+        
+        async with libsql_client.create_client(url=os.environ.get("TURSO_DATABASE_URL"), auth_token=os.environ.get("TURSO_AUTH_TOKEN")) as client:
+            await client.execute("INSERT INTO lecturas (temperatura_c, ph_valor) VALUES (?, ?)", (temp, ph))
+        
         return jsonify({"status": "ok"}), 200
     except Exception as e:
         print(f"Error procesando la petición /datos: {e}")
         return jsonify({"status": "error en el servidor"}), 500
 
 @app.route('/get_data', methods=['GET'])
-def get_data():
+async def get_data():
     try:
-        client = create_turso_client()
-        rs = client.execute("SELECT timestamp, temperatura_c, ph_valor FROM lecturas ORDER BY timestamp DESC LIMIT 1000")
-        data = list(rs)[::-1]
+        async with libsql_client.create_client(url=os.environ.get("TURSO_DATABASE_URL"), auth_token=os.environ.get("TURSO_AUTH_TOKEN")) as client:
+            rs = await client.execute("SELECT timestamp, temperatura_c, ph_valor FROM lecturas ORDER BY timestamp DESC LIMIT 1000")
+            data = list(rs)[::-1]
+        
         timestamps = [row[0] for row in data]
         temperatures = [row[1] for row in data]
         phs = [row[2] for row in data]
-        client.close()
+        
         return jsonify({"timestamps": timestamps, "temperatures": temperatures, "phs": phs})
     except Exception as e:
         print(f"Error al obtener datos /get_data: {e}")
         return jsonify({"error": str(e)}), 500
-
-# Se llama a init_db() cuando Render inicia la aplicación
-init_db()
