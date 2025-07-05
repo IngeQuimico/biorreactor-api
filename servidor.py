@@ -1,8 +1,8 @@
-# servidor.py (Versión final con Turso y conexión corregida)
+# servidor.py (Versión final con cliente SÍNCRONO para Flask)
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import os
-import libsql_client # Importamos la librería
+import libsql_client
 
 app = Flask(__name__)
 CORS(app)
@@ -17,8 +17,9 @@ def create_turso_client():
         raise ValueError("No se encontró la variable de entorno TURSO_DATABASE_URL")
     
     # --- CORRECCIÓN ---
-    # La forma correcta de crear el cliente es usando la función create_client
-    return libsql_client.create_client(url=url, auth_token=auth_token)
+    # Usamos el cliente SÍNCRONO, que se instancia directamente con la clase Client.
+    # Esto es compatible con el entorno estándar de Flask.
+    return libsql_client.Client(url=url, auth_token=auth_token)
 
 # --- FUNCIÓN PARA INICIALIZAR LA BASE DE DATOS ---
 def init_db():
