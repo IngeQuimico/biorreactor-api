@@ -1,40 +1,59 @@
-# servidor.py (Versión final con puente ASGI-WSGI)
+# servidor.py (Versión final con cliente SÍNCRONO)
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import os
-import libsql_client
-from asgiref.wsgi import WsgiToAsgi # <--- IMPORTAR EL TRADUCTOR
+import libsql_experimental as sqlite3 # <--- IMPORTAMOS LA NUEVA LIBRERÍA
 
 app = Flask(__name__)
 CORS(app)
 
-# --- APLICAR EL TRADUCTOR ---
-# Esto envuelve nuestra aplicación Flask para que pueda "hablar" con el servidor ASGI (Uvicorn)
-asgi_app = WsgiToAsgi(app) # <--- APLICAR EL TRADUCTOR
-
-def create_turso_client():
+# --- FUNCIÓN PARA CREAR UNA CONEXIÓN CON TURSO ---
+def create_turso_connection():
+    """Crea y devuelve una conexión a Turso usando las credenciales del entorno."""
     url = os.environ.get("TURSO_DATABASE_URL")
     auth_token = os.environ.get("TURSO_AUTH_TOKEN")
+    
     if not url: raise ValueError("Variable TURSO_DATABASE_URL no encontrada.")
     if not auth_token: raise ValueError("Variable TURSO_AUTH_TOKEN no encontrada.")
-    return libsql_client.create_client(url=url, auth_token=auth_token)
+    
+    # La nueva librería se conecta de forma síncrona, ideal para Flask
+    return sqlite3.connect(database=url, auth_token=auth_token)
 
+# --- FUNCIÓN PARA INICIALIZAR LA BASE DE DATOS ---
 def init_db():
+    """Asegura que la tabla 'lecturas' exista en la base de datos de Turso."""
     try:
-        client = create_turso_client()
-        client.execute("CREATE TABLE IF NOT EXISTS lecturas (id INTEGER PRIMARY KEY, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP, temperatura_c REAL, ph_valor REAL)")
+        conn = create_turso_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS lecturas (
+                id INTEGER PRIMARY KEY,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                temperatura_c REAL,
+                ph_valor REAL
+            )
+        """)
+        conn.commit()
+        conn.close()
         print("Conexión con Turso exitosa. Tabla 'lecturas' verificada.")
-        client.close()
     except Exception as e:
         print(f"Error al inicializar la base de datos en Turso: {e}")
+
+# --- RUTAS DE LA API ---
 
 @app.route('/datos', methods=['POST'])
 def recibir_datos():
     try:
         datos = request.get_json()
-        client = create_turso_client()
-        client.execute("INSERT INTO lecturas (temperatura_c, ph_valor) VALUES (?, ?)", (datos.get('temperatura'), datos.get('ph')))
-        client.close()
+        temp = datos.get('temperatura')
+        ph = datos.get('ph')
+        print(f"Dato recibido -> Temp: {temp} °C, pH: {ph}")
+        
+        conn = create_turso_connection()
+        cursor = conn.cursor()
+        cursor.execute("INSERT INTO lecturas (temperatura_c, ph_valor) VALUES (?, ?)", (temp, ph))
+        conn.commit()
+        conn.close()
         return jsonify({"status": "ok"}), 200
     except Exception as e:
         print(f"Error procesando la petición /datos: {e}")
@@ -43,16 +62,20 @@ def recibir_datos():
 @app.route('/get_data', methods=['GET'])
 def get_data():
     try:
-        client = create_turso_client()
-        rs = client.execute("SELECT timestamp, temperatura_c, ph_valor FROM lecturas ORDER BY timestamp DESC LIMIT 1000")
-        data = list(rs)[::-1]
+        conn = create_turso_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT timestamp, temperatura_c, ph_valor FROM lecturas ORDER BY timestamp DESC LIMIT 1000")
+        data = cursor.fetchall()[::-1]
+        
         timestamps = [row[0] for row in data]
         temperatures = [row[1] for row in data]
         phs = [row[2] for row in data]
-        client.close()
+        
+        conn.close()
         return jsonify({"timestamps": timestamps, "temperatures": temperatures, "phs": phs})
     except Exception as e:
         print(f"Error al obtener datos /get_data: {e}")
         return jsonify({"error": str(e)}), 500
 
+# Se llama a init_db() cuando Render inicia la aplicación
 init_db()
