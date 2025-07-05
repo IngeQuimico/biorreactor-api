@@ -1,4 +1,4 @@
-# servidor.py (Versión con depuración avanzada)
+# servidor.py (Versión final con el método de conexión oficial)
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import os
@@ -15,22 +15,21 @@ def create_turso_client():
     
     # --- LOGGING PARA DEPURACIÓN ---
     print("--- Intentando crear cliente de Turso ---")
-    if url:
-        print(f"URL de Turso encontrada: {url}")
-    else:
+    if not url:
         print("ERROR CRÍTICO: La variable de entorno TURSO_DATABASE_URL no fue encontrada.")
         raise ValueError("No se encontró la variable de entorno TURSO_DATABASE_URL")
-
-    if auth_token:
-        # No imprimimos el token completo por seguridad
-        print(f"Token de Turso encontrado (parcial): ...{auth_token[-4:]}")
-    else:
+    if not auth_token:
         print("ERROR CRÍTICO: La variable de entorno TURSO_AUTH_TOKEN no fue encontrada.")
         raise ValueError("No se encontró la variable de entorno TURSO_AUTH_TOKEN")
+    
+    print(f"URL de Turso encontrada: {url}")
+    print(f"Token de Turso encontrado (parcial): ...{auth_token[-4:]}")
 
     try:
-        # Pasamos los argumentos por posición
-        client = libsql_client.Client(url, auth_token)
+        # --- CORRECCIÓN FINAL Y DEFINITIVA ---
+        # Usamos la función oficial 'create_client' con argumentos nombrados.
+        # Esta es la forma correcta y robusta de crear la conexión.
+        client = libsql_client.create_client(url=url, auth_token=auth_token)
         print("Cliente de Turso creado exitosamente.")
         return client
     except Exception as e:
