@@ -1,4 +1,4 @@
-# servidor.py (Versión final con cliente SÍNCRONO para Flask)
+# servidor.py (Versión final con argumentos posicionales)
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import os
@@ -16,10 +16,10 @@ def create_turso_client():
     if not url:
         raise ValueError("No se encontró la variable de entorno TURSO_DATABASE_URL")
     
-    # --- CORRECCIÓN ---
-    # Usamos el cliente SÍNCRONO, que se instancia directamente con la clase Client.
-    # Esto es compatible con el entorno estándar de Flask.
-    return libsql_client.Client(url=url, auth_token=auth_token)
+    # --- CORRECCIÓN FINAL ---
+    # Pasamos los argumentos por posición en lugar de por nombre.
+    # Esto es más compatible con algunas versiones de la librería.
+    return libsql_client.Client(url, auth_token)
 
 # --- FUNCIÓN PARA INICIALIZAR LA BASE DE DATOS ---
 def init_db():
