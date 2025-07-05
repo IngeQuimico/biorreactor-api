@@ -1,20 +1,28 @@
-# servidor.py (Versión final con Turso)
+# servidor.py (Versión final con Turso y conexión corregida)
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import os
-from libsql_client import Client
+import libsql_client # Importamos la librería
 
 app = Flask(__name__)
 CORS(app)
 
+# --- FUNCIÓN PARA CREAR UNA CONEXIÓN CON TURSO ---
 def create_turso_client():
+    """Crea y devuelve un cliente de Turso usando las credenciales del entorno."""
     url = os.environ.get("TURSO_DATABASE_URL")
     auth_token = os.environ.get("TURSO_AUTH_TOKEN")
+    
     if not url:
         raise ValueError("No se encontró la variable de entorno TURSO_DATABASE_URL")
-    return Client(url=url, auth_token=auth_token)
+    
+    # --- CORRECCIÓN ---
+    # La forma correcta de crear el cliente es usando la función create_client
+    return libsql_client.create_client(url=url, auth_token=auth_token)
 
+# --- FUNCIÓN PARA INICIALIZAR LA BASE DE DATOS ---
 def init_db():
+    """Asegura que la tabla 'lecturas' exista en la base de datos de Turso."""
     try:
         client = create_turso_client()
         client.execute("""
@@ -30,6 +38,8 @@ def init_db():
     except Exception as e:
         print(f"Error al inicializar la base de datos en Turso: {e}")
 
+# --- RUTAS DE LA API ---
+
 @app.route('/datos', methods=['POST'])
 def recibir_datos():
     try:
@@ -37,6 +47,7 @@ def recibir_datos():
         temp = datos.get('temperatura')
         ph = datos.get('ph')
         print(f"Dato recibido -> Temp: {temp} °C, pH: {ph}")
+        
         client = create_turso_client()
         client.execute("INSERT INTO lecturas (temperatura_c, ph_valor) VALUES (?, ?)", (temp, ph))
         client.close()
@@ -51,13 +62,16 @@ def get_data():
         client = create_turso_client()
         rs = client.execute("SELECT timestamp, temperatura_c, ph_valor FROM lecturas ORDER BY timestamp DESC LIMIT 1000")
         data = list(rs)[::-1]
+        
         timestamps = [row[0] for row in data]
         temperatures = [row[1] for row in data]
         phs = [row[2] for row in data]
+        
         client.close()
         return jsonify({"timestamps": timestamps, "temperatures": temperatures, "phs": phs})
     except Exception as e:
         print(f"Error al obtener datos /get_data: {e}")
         return jsonify({"error": str(e)}), 500
 
+# Se llama a init_db() cuando Render inicia la aplicación
 init_db()
